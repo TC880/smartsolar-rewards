@@ -182,6 +182,25 @@
     .reveal{animation:up .5s ease both}
     @keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   }
+  /* ---- admin view ---- */
+  .adm-field{margin-bottom:12px}
+  .adm-field label{display:block;font-size:13px;font-weight:600;color:var(--ink);margin-bottom:5px}
+  .adm-field input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font:inherit;font-size:16px;color:var(--ink);background:var(--paper)}
+  .adm-field input:focus{outline:2px solid var(--gold);outline-offset:0;border-color:var(--gold)}
+  .adm-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .adm-card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;margin-bottom:12px}
+  .adm-card h4{font-size:16px;color:var(--navy);margin-bottom:2px}
+  .adm-meta{font-size:13px;color:var(--muted);margin-bottom:10px}
+  .adm-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .btn.sm{padding:8px 12px;font-size:13px}
+  .btn.leaf{background:var(--leaf);color:#fff}
+  .adm-ok{color:var(--leaf);font-weight:600;font-size:13px}
+  .adm-err{color:var(--danger);font-weight:600;font-size:13px;margin-top:8px}
+  .adm-section{margin-top:26px}
+  .adm-toggle{background:none;border:none;color:var(--gold-deep);font:inherit;font-weight:700;
+    cursor:pointer;font-size:14px;padding:0}
 </style>
 </head>
 <body>
@@ -461,6 +480,196 @@ function renderError(msg){
   footerText();
 }
 
+/* ---------------- view: admin (?admin) ---------------- */
+function admPass(){ return sessionStorage.getItem("ssr_admin_pass") || ""; }
+
+function renderAdminLogin(msg){
+  app.innerHTML = `
+    <div class="reveal">
+      <span class="eyebrow">SmartSolar Rewards</span>
+      <h1 style="font-size:26px">Admin</h1>
+      <div class="adm-field" style="margin-top:18px">
+        <label for="admPassIn">Passcode</label>
+        <input id="admPassIn" type="password" autocomplete="current-password" />
+      </div>
+      <button class="btn" id="admGo" type="button">Unlock</button>
+      ${msg ? `<div class="adm-err">${esc(msg)}</div>` : ""}
+    </div>`;
+  foot.innerHTML = "";
+  const go = ()=>{
+    sessionStorage.setItem("ssr_admin_pass", document.getElementById("admPassIn").value);
+    renderAdmin();
+  };
+  document.getElementById("admGo").addEventListener("click", go);
+  document.getElementById("admPassIn").addEventListener("keydown", e=>{ if(e.key==="Enter") go(); });
+}
+
+async function admRpc(name, args){
+  return rpc(name, Object.assign({p_pass: admPass()}, args || {}));
+}
+
+async function renderAdmin(){
+  if(!admPass()) return renderAdminLogin();
+  let d;
+  try{ d = await admRpc("rewards_admin_list"); }
+  catch(e){ return renderError("Couldn't load admin. Check your connection and try again."); }
+  if(!d.ok){
+    sessionStorage.removeItem("ssr_admin_pass");
+    return renderAdminLogin("Wrong passcode.");
+  }
+
+  const base = `${location.origin}${location.pathname}`;
+  const hs = d.homeowners || [];
+  const rs = d.referrals || [];
+
+  const statusChip = (r)=>{
+    if(r.status === "closed") return `<span class="chip closed">Closed</span>`;
+    if(r.status === "meeting_done") return `<span class="chip sat">Sat down</span>`;
+    return `<span class="chip requested">Booked</span>`;
+  };
+  const refActions = (r)=>{
+    const b = [];
+    if(r.status === "requested")
+      b.push(`<button class="btn sm" data-act="sat" data-id="${r.id}" type="button">Mark sat down</button>`);
+    if(r.status === "meeting_done" && !r.sit_paid)
+      b.push(`<button class="btn sm leaf" data-act="sit_paid" data-id="${r.id}" type="button">$25 paid ✓</button>`);
+    if(r.status !== "closed")
+      b.push(`<button class="btn sm ghost" data-act="closed" data-id="${r.id}" type="button" style="color:var(--navy)">Mark closed</button>`);
+    if(r.status === "closed" && !r.referral_paid)
+      b.push(`<button class="btn sm leaf" data-act="ref_paid" data-id="${r.id}" type="button">$1,000 paid ✓</button>`);
+    return b.join("");
+  };
+
+  app.innerHTML = `
+    <div class="reveal">
+      <span class="eyebrow">SmartSolar Rewards</span>
+      <h1 style="font-size:26px">Admin</h1>
+
+      <div class="adm-section">
+        <button class="adm-toggle" id="admAddToggle" type="button">+ Add homeowner</button>
+        <div id="admAddForm" style="display:none;margin-top:14px" class="adm-card">
+          <div class="adm-field"><label>Full name (private)</label><input id="afFull" placeholder="Maria Gonzalez"/></div>
+          <div class="adm-grid2">
+            <div class="adm-field"><label>Display name (public)</label><input id="afDisp" placeholder="Maria G."/></div>
+            <div class="adm-field"><label>City</label><input id="afCity" placeholder="Riverview, FL"/></div>
+          </div>
+          <div class="adm-grid2">
+            <div class="adm-field"><label>Install date</label><input id="afDate" type="date"/></div>
+            <div class="adm-field"><label>System kW (optional)</label><input id="afKw" type="number" step="0.1" inputmode="decimal"/></div>
+          </div>
+          <div class="adm-grid2">
+            <div class="adm-field"><label>Avg bill BEFORE ($/mo)</label><input id="afB4" type="number" inputmode="numeric"/></div>
+            <div class="adm-field"><label>Avg bill AFTER ($/mo)</label><input id="afAf" type="number" inputmode="numeric"/></div>
+          </div>
+          <button class="btn" id="afSave" type="button">Save homeowner</button>
+          <div id="afMsg"></div>
+        </div>
+      </div>
+
+      <div class="adm-section">
+        <h3 style="color:var(--navy)">Referrals</h3>
+        ${rs.length === 0
+          ? `<div class="empty">No bookings yet.</div>`
+          : rs.map(r=>`
+            <div class="adm-card">
+              <h4>${esc(r.prospect_name)} <span style="font-weight:400;color:var(--muted)">→ ${esc(r.homeowner)}'s referral</span></h4>
+              <div class="adm-meta">
+                ${esc(r.prospect_phone)}${r.prospect_email ? " · " + esc(r.prospect_email) : ""}
+                ${r.best_time ? " · best: " + esc(r.best_time) : ""} · booked ${shortDate(r.created_at)}
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                ${statusChip(r)}
+                ${r.sit_paid ? '<span class="paidtag">✓ $25 paid</span>' : ''}
+                ${r.referral_paid ? '<span class="paidtag">✓ $1,000 paid</span>' : ''}
+              </div>
+              <div class="adm-actions">${refActions(r)}</div>
+            </div>`).join("")}
+      </div>
+
+      <div class="adm-section">
+        <h3 style="color:var(--navy)">Homeowners</h3>
+        ${hs.length === 0
+          ? `<div class="empty">No homeowners yet — add your first above.</div>`
+          : hs.map(h=>`
+            <div class="adm-card">
+              <h4>${esc(h.display_name)} <span style="font-weight:400;color:var(--muted)">(${esc(h.full_name)})</span>${h.active ? "" : ' <span class="duetag">inactive</span>'}</h4>
+              <div class="adm-meta">${esc(h.city)} · ${money(h.bill_before)} → ${money(h.bill_after)}/mo · code ${esc(h.referral_code)}</div>
+              <div class="adm-actions">
+                <button class="btn sm" data-copy="${esc(base)}?ref=${esc(h.referral_code)}" type="button">Copy share link</button>
+                <button class="btn sm ghost" data-copy="${esc(base)}?owner=${esc(h.dashboard_token)}" type="button" style="color:var(--navy)">Copy dashboard link</button>
+                <a class="btn sm ghost" style="color:var(--navy)" href="sms:?&body=${encodeURIComponent(`Here's your private SmartSolar Rewards dashboard — every neighbor you refer who goes solar is $1,000 to you: ${base}?owner=${h.dashboard_token}`)}">Text dashboard to them</a>
+              </div>
+            </div>`).join("")}
+      </div>
+
+      <div class="adm-section" style="text-align:center">
+        <button class="adm-toggle" id="admLock" type="button" style="color:var(--muted)">Lock admin</button>
+      </div>
+    </div>`;
+  foot.innerHTML = "";
+
+  document.getElementById("admAddToggle").addEventListener("click", ()=>{
+    const f = document.getElementById("admAddForm");
+    f.style.display = f.style.display === "none" ? "block" : "none";
+  });
+  document.getElementById("admLock").addEventListener("click", ()=>{
+    sessionStorage.removeItem("ssr_admin_pass");
+    renderAdminLogin();
+  });
+
+  document.getElementById("afSave").addEventListener("click", async ()=>{
+    const msg = document.getElementById("afMsg");
+    const val = id => document.getElementById(id).value.trim();
+    msg.innerHTML = "";
+    const btn = document.getElementById("afSave");
+    btn.disabled = true; btn.textContent = "Saving…";
+    let res;
+    try{
+      res = await admRpc("rewards_admin_add_homeowner", {
+        p_full_name: val("afFull"),
+        p_display_name: val("afDisp"),
+        p_city: val("afCity"),
+        p_install_date: val("afDate") || null,
+        p_system_kw: val("afKw") ? Number(val("afKw")) : null,
+        p_bill_before: Number(val("afB4")),
+        p_bill_after: Number(val("afAf"))
+      });
+    }catch(e){ res = {ok:false, error:"network"}; }
+    btn.disabled = false; btn.textContent = "Save homeowner";
+    if(!res.ok){
+      msg.innerHTML = `<div class="adm-err">${res.error === "bad_input"
+        ? "Check the fields — name, display name, city, and both bill amounts are required."
+        : "Couldn't save. Check your connection and try again."}</div>`;
+      return;
+    }
+    renderAdmin();
+  });
+
+  app.querySelectorAll("[data-copy]").forEach(el=>{
+    el.addEventListener("click", async ()=>{
+      try{ await navigator.clipboard.writeText(el.getAttribute("data-copy")); }catch(e){}
+      const orig = el.textContent;
+      el.textContent = "Copied ✓";
+      setTimeout(()=>{ el.textContent = orig; }, 2000);
+    });
+  });
+
+  app.querySelectorAll("[data-act]").forEach(el=>{
+    el.addEventListener("click", async ()=>{
+      const id = el.getAttribute("data-id");
+      const act = el.getAttribute("data-act");
+      const args = {p_id: id};
+      if(act === "sat") args.p_status = "meeting_done";
+      if(act === "closed") args.p_status = "closed";
+      if(act === "sit_paid") args.p_sit_paid = true;
+      if(act === "ref_paid") args.p_referral_paid = true;
+      el.disabled = true;
+      try{ await admRpc("rewards_admin_update_referral", args); }catch(e){}
+      renderAdmin();
+    });
+  });
+}
+
 /* ---------------- router ---------------- */
 (function(){
   const q = new URLSearchParams(location.search);
@@ -470,7 +679,8 @@ function renderError(msg){
     renderError("Setup step missing: open index.html and paste your Supabase URL and anon key into the CONFIG block at the top of the script.");
     return;
   }
-  if(owner) renderDashboard(owner.trim());
+  if(q.has("admin")) renderAdmin();
+  else if(owner) renderDashboard(owner.trim());
   else if(ref) renderProof(ref.trim());
   else renderLanding();
 })();
